@@ -1,0 +1,95 @@
+import os
+import cv2
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import ParameterGrid
+
+# Definir o fator de conversão de pixels para milímetros
+pixels_per_mm = 22
+
+# Função para aplicar nitidez à imagem
+def apply_sharpening(image):
+    kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
+    return cv2.filter2D(image, -1, kernel)
+
+# Função para rotacionar uma imagem 90 graus no sentido horário
+def rotate_image_clockwise(image):
+    return cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
+
+# Função para identificar grãos gessados
+def identify_chalky_grains(image, kernel_size=(3, 3), min_contour_area=200, threshold_value=203):
+    gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    clahe = cv2.createCLAHE(clipLimit=1.6, tileGridSize=(8, 8))
+    enhanced_image = clahe.apply(gray_image)
+    
+    _, bright_thresh = cv2.threshold(enhanced_image, threshold_value, 255, cv2.THRESH_BINARY)
+    kernel = np.ones(kernel_size, np.uint8)
+    opening = cv2.morphologyEx(bright_thresh, cv2.MORPH_OPEN, kernel, iterations=2)
+    closing = cv2.morphologyEx(opening, cv2.MORPH_CLOSE, kernel, iterations=2)
+    
+    contours, _ = cv2.findContours(closing, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    valid_contours = [cnt for cnt in contours if cv2.contourArea(cnt) >= min_contour_area]
+    total_area = sum([cv2.contourArea(cnt) for cnt in valid_contours])
+    
+    return valid_contours, total_area
+
+# Função principal para processar imagens com diferentes parâmetros
+def process_images_with_parameters(folder_path, param_grid):
+    results = []
+    pixels_per_cm = 37.795275591
+
+    # Iterar sobre todas as combinações de parâmetros
+    for params in ParameterGrid(param_grid):
+        for file in os.listdir(folder_path):
+            if file.lower().endswith(('.jpg', '.tiff')):
+                image_path = os.path.join(folder_path, file)
+                image = cv2.imread(image_path, cv2.IMREAD_COLOR)
+
+                if image is not None:
+                    print(f"Processando {file} com parâmetros {params}")
+                    rotated_image = rotate_image_clockwise(image)
+                    half_width = rotated_image.shape[1] // 2
+                    cropped_image = rotated_image[:, half_width:]
+
+                    if cropped_image.size > 0:
+                        sharpened_image = apply_sharpening(cropped_image)
+                        contours, chalky_grains_area = identify_chalky_grains(
+                            sharpened_image,
+                            kernel_size=params['kernel_size'],
+                            min_contour_area=params['min_contour_area'],
+                            threshold_value=params['threshold_value']
+                        )
+
+                        gray_image = cv2.cvtColor(sharpened_image, cv2.COLOR_BGR2GRAY)
+                        _, segmented = cv2.threshold(gray_image, 100, 255, cv2.THRESH_BINARY)
+                        contours_total, _ = cv2.findContours(segmented, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+                        area_total_grains = sum([cv2.contourArea(cnt) for cnt in contours_total])
+                        percentage_chalky = (chalky_grains_area / area_total_grains) * 100 if area_total_grains > 0 else 0
+
+                        results.append({
+                            'Image Name': file,
+                            'Threshold Value': params['threshold_value'],
+                            'Kernel Size': params['kernel_size'],
+                            'Min Contour Area': params['min_contour_area'],
+                            'Porcentagem de Grãos Gessados (%)': percentage_chalky
+                        })
+
+    # Salvar os resultados em Excel
+    df_results = pd.DataFrame(results)
+    output_excel_path = os.path.join(folder_path, "resultados_graos_gessados_simulacao.xlsx")
+    df_results.to_excel(output_excel_path, index=False)
+    print(f"Resultados salvos em: {output_excel_path}")
+
+# Definir a grade de parâmetros para a simulação
+param_grid_expanded = {
+    'threshold_value': list(range(180, 211, 1)),
+    'kernel_size': [(2, 2), (3, 3), (4, 4), (5, 5), (6, 6)],
+    'min_contour_area': list(range(20, 401, 20))
+}
+
+# Caminho da pasta com as imagens
+folder_path = 'D://Rice grain image dataset/giradas'
+
+# Executar o processamento com a grade de parâmetros
+process_images_with_parameters(folder_path, param_grid_expanded)
