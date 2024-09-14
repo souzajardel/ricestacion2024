@@ -1,0 +1,147 @@
+import os
+import cv2
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# Definir o fator de conversão de pixels para milímetros
+pixels_per_mm = 7
+
+# Função para verificar se o contorno é um grão de arroz (baseado em excentricidade e área)
+def is_grain(contour, min_area=400, excentricity_threshold=2, min_pixel_area=100):
+    rect = cv2.minAreaRect(contour)
+    width, height = rect[1]
+    
+    # Garantir que o comprimento seja o maior dos dois e calcular excentricidade
+    if width > height:
+        width, height = height, width
+    
+    excentricity = height / width if width > 0 else 0
+    area_grain = cv2.contourArea(contour)
+    
+    # Verificar critérios de excentricidade e área mínima
+    if excentricity >= excentricity_threshold and area_grain >= min_area and cv2.contourArea(contour) >= min_pixel_area:
+        return True
+    return False
+
+# Função para medir grãos isolados
+def measure_grains(image, contours):
+    num_isolated_grains = 0
+    lengths = []
+    widths = []
+    total_area = 0
+
+    # Criar cópia para desenhar/pintar grãos isolados
+    painted_image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+
+    for contour in contours:
+        if is_grain(contour):
+            rect = cv2.minAreaRect(contour)
+            width, height = rect[1]
+
+            # Reorientar se necessário para garantir que o eixo maior seja o comprimento
+            if width > height:
+                width, height = height, width
+
+            comprimento_mm = height / pixels_per_mm
+            largura_mm = width / pixels_per_mm
+            lengths.append(comprimento_mm)
+            widths.append(largura_mm)
+            num_isolated_grains += 1
+
+            # Preencher os grãos com uma cor (exemplo: azul)
+            cv2.drawContours(painted_image, [contour], -1, (255, 0, 0), thickness=cv2.FILLED)
+
+            area_grain = cv2.contourArea(contour)
+            total_area += area_grain / (pixels_per_mm ** 2)  # Converter para mm²
+
+    median_length = np.median(lengths) if lengths else 0
+    median_width = np.median(widths) if widths else 0
+    average_area = total_area / num_isolated_grains if num_isolated_grains > 0 else 0
+
+    return painted_image, num_isolated_grains, median_length, median_width, average_area
+
+# Função principal para análise de imagens
+def visualize_and_analyze_hyper_image(folder_path, threshold=60, min_area=400, excentricity_threshold=2, min_pixel_area=100):
+    results = []
+
+    for file in os.listdir(folder_path):
+        if file.lower().endswith('.tiff'):
+            print(f"Processando o arquivo: {file}")
+            tiff_path = os.path.join(folder_path, file)
+            img = cv2.imread(tiff_path, cv2.IMREAD_GRAYSCALE)
+
+            # Verificação da leitura da imagem
+            if img is None:
+                print(f"Falha ao ler a imagem: {file}")
+                continue
+            else:
+                print(f"Dimensões da imagem: {img.shape}")
+
+            # Ajuste do Threshold
+            _, segmented = cv2.threshold(img, threshold, 255, cv2.THRESH_BINARY)
+            print(f"Imagem segmentada para {file}")
+
+            # Ajuste no processo de dilatação
+            kernel_size_dilate = 3  # Diminuir o tamanho do kernel de dilatação
+            kernel_dilate = np.ones((kernel_size_dilate, kernel_size_dilate), np.uint8)
+            dilated = cv2.dilate(segmented, kernel_dilate, iterations=1)  # Menos iterações
+            print(f"Dilatação aplicada para {file}")
+
+            # Aumentar a erosão para separar grãos conectados
+            kernel_size_erode = 3
+            kernel_erode = np.ones((kernel_size_erode, kernel_size_erode), np.uint8)
+            eroded = cv2.erode(dilated, kernel_erode, iterations=2)  # Aumentar o número de iterações de erosão
+
+            # Abertura morfológica adicional para refinar a separação dos grãos
+            kernel_size_open = 3  # Kernel pequeno para a operação de abertura
+            kernel_open = np.ones((kernel_size_open, kernel_size_open), np.uint8)
+            opened = cv2.morphologyEx(eroded, cv2.MORPH_OPEN, kernel_open)
+            print(f"Abertura morfológica aplicada para {file}")
+
+            # Encontrar contornos usando cv2.RETR_TREE para capturar hierarquias
+            contours, _ = cv2.findContours(opened, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+            print(f"Contornos encontrados: {len(contours)} para {file}")
+
+            # Filtrar e medir grãos isolados
+            painted_image, num_isolated_grains, median_length, median_width, average_area = measure_grains(img, contours)
+
+            # Visualização
+            plt.figure(figsize=(12, 6))
+
+            plt.subplot(1, 3, 1)
+            plt.imshow(img, cmap='gray')
+            plt.title(f'Original Image - {file}')
+            plt.axis('off')
+
+            plt.subplot(1, 3, 2)
+            plt.imshow(segmented, cmap='gray')
+            plt.title('Segmented Image')
+            plt.axis('off')
+
+            plt.subplot(1, 3, 3)
+            plt.imshow(painted_image)
+            plt.title(f'Isolated Grains ({num_isolated_grains} grains, Avg Area: {average_area:.2f} mm²)')
+            plt.axis('off')
+
+            plt.show()
+
+            # Resultados da análise
+            results.append({
+                'Image Name': file,
+                'Number of Isolated Grains': num_isolated_grains,
+                'Median Length (mm)': median_length,
+                'Median Width (mm)': median_width,
+                'Average Grain Area (mm²)': average_area,
+            })
+
+    # Salvando resultados em Excel
+    df_results = pd.DataFrame(results)
+    excel_path = os.path.join(folder_path, "grain_measurements_filtered_identified_v8.xlsx")
+    df_results.to_excel(excel_path, index=False)
+    print(f"Arquivo Excel salvo em: {excel_path}")
+    print(df_results)
+
+# Uso
+folder_path = 'D://__ciencia_de_dados_python_2023//arroz//RGB'
+visualize_and_analyze_hyper_image(folder_path, min_area=400, excentricity_threshold=2, min_pixel_area=100)
