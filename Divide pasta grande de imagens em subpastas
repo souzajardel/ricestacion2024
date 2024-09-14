@@ -1,0 +1,29 @@
+import os
+import shutil
+
+def create_batches_of_images(source_folder, batch_size=25):
+    # Listar todas as imagens no diretório
+    file_list = [f for f in os.listdir(source_folder) if f.lower().endswith('.jpg')]
+    num_files = len(file_list)
+    num_batches = (num_files + batch_size - 1) // batch_size  # Calcular o número de lotes
+    
+    for i in range(num_batches):
+        # Criar uma nova pasta para cada lote
+        batch_folder = os.path.join(source_folder, f'batch_{i+1}')
+        os.makedirs(batch_folder, exist_ok=True)
+        
+        # Selecionar os arquivos para este lote
+        batch_files = file_list[i*batch_size:(i+1)*batch_size]
+        
+        for file in batch_files:
+            source_path = os.path.join(source_folder, file)
+            destination_path = os.path.join(batch_folder, file)
+            shutil.move(source_path, destination_path)
+        
+        print(f"Lote {i+1} criado com {len(batch_files)} imagens.")
+
+# Caminho para a pasta de origem contendo todas as imagens
+source_folder = 'D://__ciencia_de_dados_python_2023//arroz//camera'
+
+# Dividir as imagens em lotes de 25
+create_batches_of_images(source_folder)
