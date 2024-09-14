@@ -1,0 +1,34 @@
+import pandas as pd
+
+# Caminhos dos arquivos
+referencia_path = 'D://__ciencia_de_dados_python_2023//arroz//referencia.xlsx'
+resultados_path = 'D://__ciencia_de_dados_python_2023//arroz//resultados_graos_gessados2_todas_combinacoes.xlsx'
+output_file_path = 'D://__ciencia_de_dados_python_2023//arroz//correlacao_graos_gessados.xlsx'
+
+# Carregar os dados
+df_referencia = pd.read_excel(referencia_path)
+df_resultados = pd.read_excel(resultados_path)
+
+# Garantir que os nomes das colunas estão corretos
+df_referencia.columns = ['Nome da Imagem', 'Porcentagem_Grãos_Gessados_Referencia']
+df_resultados.columns = ['Nome da Imagem', 'Porcentagem_Grãos_Gessados_Resultados', 'Clip_Limit', 'Threshold_Value', 'Kernel_Size']
+
+# Normalizar os nomes das imagens removendo espaços em branco e convertendo para minúsculas
+df_referencia['Nome da Imagem'] = df_referencia['Nome da Imagem'].str.strip().str.lower()
+df_resultados['Nome da Imagem'] = df_resultados['Nome da Imagem'].str.strip().str.lower()
+
+# Combinar os dataframes baseado na coluna 'Nome da Imagem'
+df_combined = pd.merge(df_resultados, df_referencia, on='Nome da Imagem')
+
+# Calcular a correlação para cada combinação de Clip_Limit, Threshold_Value e Kernel_Size
+def calculate_correlation(group):
+    correlation = group['Porcentagem_Grãos_Gessados_Resultados'].corr(group['Porcentagem_Grãos_Gessados_Referencia'])
+    return pd.Series({'Correlação': correlation})
+
+# Aplicar a função de correlação em cada grupo
+correlation_results = df_combined.groupby(['Clip_Limit', 'Threshold_Value', 'Kernel_Size']).apply(calculate_correlation).reset_index()
+
+# Salvar os resultados em um arquivo Excel
+correlation_results.to_excel(output_file_path, index=False)
+
+print(f"Resultados de correlação salvos em {output_file_path}")
